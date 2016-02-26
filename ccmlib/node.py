@@ -105,7 +105,6 @@ class Node(object):
         self.__install_dir = None
         self.__global_log_level = None
         self.__classes_log_level = {}
-        self.__conf_updated = False
         if save:
             self.import_config_files()
             self.import_bin_files()
@@ -168,10 +167,7 @@ class Node(object):
         return [common.join_bin(self.get_install_dir(), 'bin', toolname)]
 
     def get_env(self):
-        update_conf = not self.__conf_updated
-        if update_conf:
-            self.__conf_updated = True
-        return common.make_cassandra_env(self.get_install_dir(), self.get_path(), update_conf)
+        return common.make_cassandra_env(self.get_install_dir(), self.get_path())
 
     def get_install_cassandra_root(self):
         return self.get_install_dir()
@@ -214,7 +210,6 @@ class Node(object):
             self.__install_dir = dir
         self.import_config_files()
         self.import_bin_files()
-        self.__conf_updated = False
         return self
 
     def set_workloads(self, workloads):
@@ -1416,6 +1411,26 @@ class Node(object):
             remote_debug_options = 'JVM_OPTS="$JVM_OPTS -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=' + str(self.remote_debug_port) + '"'
 
         common.replace_in_file(conf_file, jmx_port_pattern, jmx_port_setting)
+
+
+        if common.is_win() and common.get_version_from_build(node_path=self.get_path()) >= '2.1':
+            dst = os.path.join(self.get_conf_dir(), common.CASSANDRA_WIN_ENV)
+        else:
+            dst = os.path.join(self.get_bin_dir(), common.CASSANDRA_SH)
+
+        replacements = ""
+        if common.is_win() and common.get_version_from_build(node_path=self.get_path()) >= '2.1':
+            replacements = [
+                ('env:CASSANDRA_HOME =', '        $env:CASSANDRA_HOME="%s"' % self.get_install_dir()),
+                ('env:CASSANDRA_CONF =', '    $env:CCM_DIR="' + self.get_path() + '\\conf"\n    $env:CASSANDRA_CONF="$env:CCM_DIR"'),
+                ('cp = ".*?env:CASSANDRA_HOME.conf', '    $cp = """$env:CASSANDRA_CONF"""')
+            ]
+        else:
+            replacements = [
+                ('CASSANDRA_HOME=', '\tCASSANDRA_HOME=%s' % self.get_install_dir()),
+                ('CASSANDRA_CONF=', '\tCASSANDRA_CONF=%s' % os.path.join(self.get_path(), 'conf'))
+            ]
+        common.replaces_in_file(dst, replacements)
 
         if self.remote_debug_port != '0':
             remote_debug_port_pattern = '((-Xrunjdwp:)|(-agentlib:jdwp=))transport=dt_socket,server=y,suspend=n,address='
